@@ -12,7 +12,9 @@ reinforcement learning to fine temperature control - with Hanyeong Nux
  - maintaining steady temperature T0 in residual temperature \epsilone = 0.1 celcious degree
 
 ## using python libraray package
- - pytorch
- - simple pid
+ - pytorch : pip3 install torch torchvision torchaudiio --index-url https://download.pytorch.org/whl/cu126
+ - scipy, gymnasium
  - serial
- - pyvisa, pyvisa-py, measurement
+ - pyvisa, pyvisa-py, pymeasure, minimalmodbus
+ - numpy, pandas, seaborn, matplotlib
+ - pyaml
