@@ -7,12 +7,13 @@ import os
 import numpy as np
 from datetime import datetime
 
-# --- [1. Modbus 주소 (커스텀 PID/RL용)] ---
+# [수정된 권장 주소] - VX Series 매뉴얼 기반
 VX_PORT = 'COM3'
 VX_SLAVE_ID = 1
-PV_ADDRESS = 0            # VX: 현재 온도(PV) 읽기 주소
-MANUAL_MODE_ADDR = 20     # [수정] D-Register 19가 아닌, Modbus 주소 20
-MANUAL_VALUE_ADDR = 33    # [수정] D-Register 32가 아닌, Modbus 주소 33
+PV_ADDRESS = 0            # D-Reg 0: 현재 온도(PV)
+R_S_ADDR = 33             # D-Reg 33: Run/Stop (0=STOP, 1=RUN)
+A_M_ADDR = 31             # D-Reg 31: Auto/Manual (0=AUTO, 1=MANU)
+MV_IN_ADDR = 32           # D-Reg 32: 수동 출력량 입력 (0.0 ~ 100.0)
 
 # --- [2. 데이터 로깅 설정] ---
 FILENAME = 'digital_twin_data_no_mfc100.csv'
@@ -50,26 +51,38 @@ def read_temperature(vx):
         print(f"VX: 온도 읽기 실패: {e}")
         return None
 
-
-def set_vx_manual_mode(vx, mode_value):
-    """[수정] VX에 Modbus 주소 20번으로 제어 값을 전송합니다."""
+def set_run_stop(vx, is_run):
+    """VX를 RUN 또는 STOP 모드로 설정합니다. (D-Reg 33)"""
     try:
-        # 주소 20(DEC)에 값(0, 1, 9, 13 등)을 씁니다. (소수점 0자리, FC16)
-        vx.write_register(MANUAL_MODE_ADDR, mode_value, 0, 16)
-
-        # [수정] 버그를 잡고 실제 전송된 값을 출력
-        print(f"VX: 제어 모드 설정 시도 (주소 {MANUAL_MODE_ADDR}에 값 {mode_value} 전송)")
-
+        mode_value = 1 if is_run else 0
+        # D-Reg 33 (R/S)에 0 또는 1 쓰기 (FC 06 또는 16)
+        vx.write_register(R_S_ADDR, mode_value, 0, 16)
+        status = "RUN" if is_run else "STOP"
+        print(f"VX: {status} 모드 설정 (주소 {R_S_ADDR}에 값 {mode_value} 전송)")
     except Exception as e:
-        print(f"VX: 제어 모드 변경 실패: {e}")
+        print(f"VX: RUN/STOP 모드 변경 실패: {e}")
+
+def set_auto_manual(vx, is_manual):
+    """VX를 AUTO 또는 MANUAL 모드로 설정합니다. (D-Reg 31)"""
+    try:
+        mode_value = 1 if is_manual else 0
+         # D-Reg 31 (A/M)에 0 또는 1 쓰기 (FC 06 또는 16)
+        vx.write_register(A_M_ADDR, mode_value, 0, 16)
+        status = "MANUAL" if is_manual else "AUTO"
+        print(f"VX: {status} 모드 설정 (주소 {A_M_ADDR}에 값 {mode_value} 전송)")
+    except Exception as e:
+        print(f"VX: AUTO/MANUAL 모드 변경 실패: {e}")
 
 def set_vx_manual_output(vx, output_percent):
+    """VX 수동 출력값을 설정합니다. (D-Reg 32) (소수점 1자리)"""
     try:
+        # 매뉴얼(8551)에 MV IN은 소수점 1자리를 사용합니다.
         safe_output = max(0.0, min(100.0, output_percent))
-        vx.write_register(MANUAL_VALUE_ADDR, safe_output, 1, 16)
+        # minimalmodbus는 소수점 자릿수(1)를 인자로 전달해야 합니다.
+        vx.write_register(MV_IN_ADDR, safe_output, 1, 16)
+        print(f"VX: 수동 출력 설정 (주소 {MV_IN_ADDR}에 값 {safe_output} 전송)")
     except Exception as e:
         print(f"VX: 수동 출력 설정 실패: {e}")
-
 
 def log_dt_data(filename, fieldnames, data_dict):
     """Digital Twin 데이터를 CSV에 저장합니다."""
@@ -102,26 +115,21 @@ if __name__ == "__main__":
         if v is None:
             raise ConnectionError("VX 컨트롤러 연결 실패. 스크립트를 종료합니다.")
 
-        # 1. 테스트 준비: [최종 수정] 3단계 순차적 모드 변경
+        # 1. 테스트 준비: (매뉴얼 기반) 순차적 모드 변경
+        # (주의: 2단계에서 DI.MD=OFF, LOCK=0이 선행되어야 함)
 
-        # 1-A. (STOP + AUTO) 상태에서 (RUN + AUTO) 상태로 변경 (값 1)
-        print("VX: 1단계 - RUN 모드 진입 (Bit 0 = 1)")
-        set_vx_manual_mode(v, 1)  # 1 = (Bit 0: RUN)
+        print("VX: 1단계 - RUN 모드 진입")
+        set_run_stop(v, True)  # (D-Reg 33 = 1)
         time.sleep(0.5)
 
-        # 1-B. (RUN + AUTO) 상태에서 (RUN + AUTO + REM) 상태로 변경 (값 9)
-        print("VX: 2단계 - REM 모드 진입 (Bit 0 = 1, Bit 3 = 8)")
-        set_vx_manual_mode(v, 9)  # 9 = 1(RUN) + 8(REM)
+        print("VX: 2단계 - MANUAL 모드 진입")
+        set_auto_manual(v, True)  # (D-Reg 31 = 1)
         time.sleep(0.5)
 
-        # 1-C. (RUN + AUTO + REM) 상태에서 (RUN + MANUAL + REM) 상태로 변경 (값 13)
-        print("VX: 3단계 - MANUAL 모드 진입 (Bit 0 = 1, Bit 2 = 4, Bit 3 = 8)")
-        set_vx_manual_mode(v, 13)  # 13 = 1(RUN) + 4(MANUAL) + 8(REM)
+        print("VX: 3단계 - 수동 출력 0% 설정")
+        set_vx_manual_output(v, 0.0)  # (D-Reg 32 = 0.0)
 
-        # 1-D. MANUAL 모드에서 출력 0%로 설정
-        set_vx_manual_output(v, 0.0)
-
-        print("초기 안정화 대기 중 (30초)... (챔버 온도를 상온과 같게 하십시오)")
+        print("초기 안정화 대기 중 (30초)...")
         time.sleep(30)
 
         start_time = time.time()
@@ -180,6 +188,7 @@ if __name__ == "__main__":
 
 
 
+
     except Exception as e:
 
         print(f"\n[메인 오류] 프로세스 중단: {e}")
@@ -192,12 +201,12 @@ if __name__ == "__main__":
         if v:
             print("VX: 안전 종료 시작...")
 
-            set_vx_manual_output(v, 0.0)  # 히터 출력 0%
+            set_vx_manual_output(v, 0.0)  # 히터 출력 0% (D-Reg 32)
 
-            # (RUN + AUTO + REM) 상태로 복귀
+            set_auto_manual(v, False)  # AUTO 모드 복귀 (D-Reg 31)
 
-            set_vx_manual_mode(v, 9)
+            set_run_stop(v, True)  # RUN 상태 유지 (D-Reg 33)
 
             v.serial.close()
 
-            print("VX 컨트롤러 (RUN + AUTO + REM) 모드 복귀 및 연결 해제됨.")
+            print("VX 컨트롤러 (RUN + AUTO) 모드 복귀 및 연결 해제됨.")
