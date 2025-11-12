@@ -20,7 +20,7 @@ MVOUT_ADDRESS = 5         # D-Reg 5 (MVOUT, 출력량)
 PV_ADDRESS = 0            # D-Reg 0: 현재 온도(PV)
 
 # --- [2. 데이터 로깅 설정] ---
-FILENAME = 'digital_twin_data_no_mfc70.csv'
+FILENAME = 'digital_twin_data_no_mfc20.csv'
 FIELDNAMES = [
     'Timestamp',
     'Elapsed Time (s)',
@@ -124,10 +124,10 @@ def set_vx_sv1(vx, target_temp):
 if __name__ == "__main__":
 
     # --- 테스트 파라미터 [사용자 설정 필요] ---
-    STEP_OUTPUT = 70.0  # (입력) 70% 히터 출력
+    STEP_OUTPUT = 20.0  # (입력) 20% 히터 출력
     SAMPLE_TIME_S = 1.0  # (수집) 1.0초 간격
-    HEAT_DURATION_S = 300  # (시간) 300초 (5분) 가열
-    COOL_DURATION_S = 300  # (시간) 300초 (5분) 냉각
+    HEAT_DURATION_S = 120  # (시간) 300초 (2분) 가열
+    COOL_DURATION_S = 360  # (시간) 300초 (6분) 냉각
 
     v = None
     print(f"--- Digital Twin 데이터 수집 (MFC 없음) 시작 ---")
@@ -146,12 +146,12 @@ if __name__ == "__main__":
         set_run_stop(v, True)  # (D-Reg 33 = 1)
         time.sleep(0.5)
 
-        print("VX: 2단계 - MANUAL 모드 진입")
-        set_auto_manual(v, True)  # (D-Reg 31 = 1)
-        time.sleep(0.5)
-
         # [안전] 현재 SV-1 값을 안전 온도로 미리 설정
         set_vx_sv1(v, SAFE_TEMP)
+        time.sleep(0.5)
+
+        print("VX: 2단계 - MANUAL 모드 진입")
+        set_auto_manual(v, True)  # (D-Reg 31 = 1)
         time.sleep(0.5)
 
         print("VX: 3단계 - 수동 출력 0% 설정")
