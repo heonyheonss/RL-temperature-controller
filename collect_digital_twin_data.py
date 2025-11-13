@@ -7,6 +7,8 @@ import os
 import numpy as np
 from datetime import datetime
 
+from reset_vx_to_safe_state import run_safe_state_reset as rssr
+
 # [수정된 권장 주소] - VX Series 매뉴얼 기반
 VX_PORT = 'COM3'
 VX_SLAVE_ID = 1
@@ -20,7 +22,7 @@ MVOUT_ADDRESS = 5         # D-Reg 5 (MVOUT, 출력량)
 PV_ADDRESS = 0            # D-Reg 0: 현재 온도(PV)
 
 # --- [2. 데이터 로깅 설정] ---
-FILENAME = 'digital_twin_data_no_mfc20.csv'
+FILENAME = 'digital_twin_data_no_mfc1.csv'
 FIELDNAMES = [
     'Timestamp',
     'Elapsed Time (s)',
@@ -91,7 +93,7 @@ def set_vx_manual_output(vx, output_percent):
     """VX 수동 출력값을 설정합니다. (D-Reg 32) (소수점 1자리)"""
     try:
         # 매뉴얼(8551)에 MV IN은 소수점 1자리를 사용합니다.
-        safe_output = max(0.0, min(100.0, output_percent))
+        safe_output = max(0.0, min(40.0, output_percent))
         # minimalmodbus는 소수점 자릿수(1)를 인자로 전달해야 합니다.
         vx.write_register(MV_IN_ADDR, safe_output, 1, 16)
         print(f"VX: 수동 출력 설정 (주소 {MV_IN_ADDR}에 값 {safe_output} 전송)")
@@ -124,10 +126,10 @@ def set_vx_sv1(vx, target_temp):
 if __name__ == "__main__":
 
     # --- 테스트 파라미터 [사용자 설정 필요] ---
-    STEP_OUTPUT = 20.0  # (입력) 20% 히터 출력
+    STEP_OUTPUT = 1.0  # (입력) 30% 히터 출력 : 30% 출력만으로도 굉장히 높은 출력. 40%, 30%, 10%, 5%, 1% 5가지 학습
     SAMPLE_TIME_S = 1.0  # (수집) 1.0초 간격
-    HEAT_DURATION_S = 120  # (시간) 300초 (2분) 가열
-    COOL_DURATION_S = 360  # (시간) 300초 (6분) 냉각
+    HEAT_DURATION_S = 50  # (시간) 50초 가열 : 80초만 가열해도 300도까지 올라감. 실험은 아무리 높아도 200도 범위 안에서 제어
+    COOL_DURATION_S = 500  # (시간) 500초 (8분 20초) 냉각 : 냉각에는 긴 시간이 보통 필요.
 
     v = None
     print(f"--- Digital Twin 데이터 수집 (MFC 없음) 시작 ---")
@@ -255,3 +257,8 @@ if __name__ == "__main__":
 
             v.serial.close()
             print("VX 컨트롤러 (STOP + AUTO) 모드 복귀 및 연결 해제됨.")
+
+    print("\n[메인 앱] 실험이 종료되어 안전 모드 복구를 호출합니다.")
+    rssr()
+
+    print("\n[메인 앱] 모든 작업이 완료되었습니다.")
