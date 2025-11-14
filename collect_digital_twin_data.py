@@ -13,20 +13,24 @@ from reset_vx_to_safe_state import run_safe_state_reset as rssr
 VX_PORT = 'COM3'
 VX_SLAVE_ID = 1
 
-R_S_ADDR = 33             # D-Reg 33: Run/Stop (0=STOP, 1=RUN)
+# Process 그룹
+PV_ADDRESS = 0            # D-Reg 0: 현재 온도(PV)
+MVOUT_ADDRESS = 5         # D-Reg 5 (MVOUT, 출력량)
 A_M_ADDR = 31             # D-Reg 31: Auto/Manual (0=AUTO, 1=MANU)
 MV_IN_ADDR = 32           # D-Reg 32: 수동 출력량 입력 (0.0 ~ 100.0)
+R_S_ADDR = 33             # D-Reg 33: Run/Stop (0=STOP, 1=RUN)
+
+# G.SV 그룹
 SV1_ADDR = 103            # [추가] D-Reg 103: SV-1 (설정값 1)
 
-MVOUT_ADDRESS = 5         # D-Reg 5 (MVOUT, 출력량)
-PV_ADDRESS = 0            # D-Reg 0: 현재 온도(PV)
 
 # --- [2. 데이터 로깅 설정] ---
-FILENAME = 'digital_twin_data_no_mfc1.csv'
+FILENAME_PREFIX = 'step_response_' # 파일명 접두사
 FIELDNAMES = [
     'Timestamp',
     'Elapsed Time (s)',
     'Target Output (%)',  # (Python이 설정한 히터 출력)
+    'Actual Output (%)', # 컨트롤러가 실제 출력한 내용(OL-H) 반영
     'Actual Temp (C)'
 ]
 SAFE_TEMP = 25.0
@@ -49,6 +53,14 @@ def connect_vx(port, slave_id):
         print(f"VX 연결 실패: {e}")
         return None
 
+def read_temperature(vx):
+    try:
+        temp = vx.read_register(PV_ADDRESS, 1, 3)
+        return temp
+    except Exception as e:
+        print(f"VX: 온도 읽기 실패: {e}")
+        return None
+
 def read_output_percent(vx):
     """VX의 현재 MVOUT (출력량 %)을 읽습니다. (D-Reg 5, 소수점 1자리)"""
     try:
@@ -57,14 +69,6 @@ def read_output_percent(vx):
         return mv_percent
     except Exception as e:
         print(f"VX: 출력량(MV) 읽기 실패: {e}")
-        return None
-
-def read_temperature(vx):
-    try:
-        temp = vx.read_register(PV_ADDRESS, 1, 3)
-        return temp
-    except Exception as e:
-        print(f"VX: 온도 읽기 실패: {e}")
         return None
 
 def set_run_stop(vx, is_run):
@@ -100,6 +104,16 @@ def set_vx_manual_output(vx, output_percent):
     except Exception as e:
         print(f"VX: 수동 출력 설정 실패: {e}")
 
+def set_vx_sv1(vx, target_temp):
+    """[함수 추가] VX의 SV-1 (D-Reg 103) 값을 설정합니다. (소수점 1자리 가정)"""
+    try:
+        # G.SV (D-Reg 100~199)의 소수점은 G.IN>DP-P를 따릅니다. [cite: 668]
+        # 온도 읽기(PV)와 동일하게 소수점 1자리를 가정하여 SV-1 (D-Reg 103) 에 씁니다.
+        vx.write_register(SV1_ADDR, target_temp, 1, 16)
+        print(f"VX: SV-1 설정 (주소 {SV1_ADDR}에 값 {target_temp}°C 전송)")
+    except Exception as e:
+        print(f"VX: SV-1 설정 실패: {e}")
+
 def log_dt_data(filename, fieldnames, data_dict):
     """Digital Twin 데이터를 CSV에 저장합니다."""
     file_exists = os.path.isfile(filename)
@@ -111,25 +125,16 @@ def log_dt_data(filename, fieldnames, data_dict):
     except Exception as e:
         print(f"Data Logging: [오류] 파일 저장 실패: {e}")
 
-def set_vx_sv1(vx, target_temp):
-    """[함수 추가] VX의 SV-1 (D-Reg 103) 값을 설정합니다. (소수점 1자리 가정)"""
-    try:
-        # G.SV (D-Reg 100~199)의 소수점은 G.IN>DP-P를 따릅니다. [cite: 668]
-        # 온도 읽기(PV)와 동일하게 소수점 1자리를 가정하여 SV-1 (D-Reg 103) 에 씁니다.
-        vx.write_register(SV1_ADDR, target_temp, 1, 16)
-        print(f"VX: SV-1 설정 (주소 {SV1_ADDR}에 값 {target_temp}°C 전송)")
-    except Exception as e:
-        print(f"VX: SV-1 설정 실패: {e}")
-
-
 # --- [4. 메인 실행 블록 (Step Response 테스트)] ---
 if __name__ == "__main__":
 
     # --- 테스트 파라미터 [사용자 설정 필요] ---
-    STEP_OUTPUT = 1.0  # (입력) 30% 히터 출력 : 30% 출력만으로도 굉장히 높은 출력. 40%, 30%, 10%, 5%, 1% 5가지 학습
+    STEP_OUTPUT = 5.0  # (입력) 30% 히터 출력 : 30% 출력만으로도 굉장히 높은 출력. 30%, 20%, 10%, 5% 4가지 학습
     SAMPLE_TIME_S = 1.0  # (수집) 1.0초 간격
     HEAT_DURATION_S = 50  # (시간) 50초 가열 : 80초만 가열해도 300도까지 올라감. 실험은 아무리 높아도 200도 범위 안에서 제어
     COOL_DURATION_S = 500  # (시간) 500초 (8분 20초) 냉각 : 냉각에는 긴 시간이 보통 필요.
+
+    current_filename = f"{FILENAME_PREFIX}{int(STEP_OUTPUT)}.csv"
 
     v = None
     print(f"--- Digital Twin 데이터 수집 (MFC 없음) 시작 ---")
@@ -172,6 +177,7 @@ if __name__ == "__main__":
         for i in range(num_heat_steps):
             loop_start_time = time.time()
             current_temp = read_temperature(v)
+            actual_output = read_output_percent(v)
             if current_temp is None: continue
             elapsed_time = loop_start_time - start_time
 
@@ -179,9 +185,10 @@ if __name__ == "__main__":
                 'Timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 'Elapsed Time (s)': elapsed_time,
                 'Target Output (%)': STEP_OUTPUT,
+                'Actual Output (%)': actual_output,
                 'Actual Temp (C)': current_temp
             }
-            log_dt_data(FILENAME, FIELDNAMES, data_to_log)
+            log_dt_data(current_filename, FIELDNAMES, data_to_log)
             print(f"가열 중... Time: {elapsed_time:.1f}s / Temp: {current_temp}°C")
 
             loop_time = time.time() - loop_start_time
@@ -217,10 +224,11 @@ if __name__ == "__main__":
             data_to_log = {
                 'Timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 'Elapsed Time (s)': elapsed_time,
-                'Target Output (%)': current_output,  # [수정] 0.0이 아닌 실제 측정값
+                'Target Output (%)': 0.0,
+                'Actual Output (%)': current_output,
                 'Actual Temp (C)': current_temp
             }
-            log_dt_data(FILENAME, FIELDNAMES, data_to_log)
+            log_dt_data(current_filename, FIELDNAMES, data_to_log)
             print(f"냉각 중... Time: {elapsed_time:.1f}s / Temp: {current_temp}°C / Output: {current_output}%")
 
             loop_time = time.time() - loop_start_time
@@ -247,7 +255,7 @@ if __name__ == "__main__":
 
             # 3. [중요] SV-1 값을 안전 온도로 설정
             # 'MV Bumpless' 기능으로 인해 저장될 SV 값을 안전하게 덮어씁니다.
-            print(f"VX: SV-1 값을 안전 온도 ({SAFE_TEMP}°C)로 설정합니다.")
+            print(f"VX: SV 값을 안전 온도 ({SAFE_TEMP}°C)로 설정합니다.")
             set_vx_sv1(v, SAFE_TEMP)  # (D-Reg 103 = SAFE_TEMP)
             time.sleep(0.5)
 

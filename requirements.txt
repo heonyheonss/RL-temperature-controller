@@ -1,0 +1,25 @@
+# pytorch : pip3 itall torch torchvision torchaudiio --index-url https://download.pytorch.org/whl/cu126
+# Machine Learning Support Library
+pyaml
+
+# Data Library Package
+scipy
+numpy
+pandas
+seaborn
+matplotlib
+
+# Hardware Protocol
+pyserial
+pyvisa
+pyvisa-py
+pymeasure
+minimalmodbus
+
+# Reinforcemnet Learning Envrionment
+# check torchrl is available
+# gymnasium[all]
+# or remove bellow hashes
+# "gymnasium[classic_control]"
+# pygame
+# pyglet
