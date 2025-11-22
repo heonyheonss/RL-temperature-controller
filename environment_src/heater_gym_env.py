@@ -31,7 +31,7 @@ class HeaterEnv(gym.Env):
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
 
-        self.current_temp = 25.0  # 상온
+        self.current_temp = 25.0  #
         self.prev_temp = 25.0
         self.current_step = 0
         self.max_steps = 600  # 10분(600초)
@@ -88,3 +88,5 @@ class HeaterEnv(gym.Env):
         truncated = self.current_step >= self.max_steps
 
         return self._get_obs(), reward, terminated, truncated, {}
+
+    def render(self):
